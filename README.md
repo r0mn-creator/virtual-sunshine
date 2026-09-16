@@ -1,3 +1,23 @@
+# Virtual Sunshine *(working name)*
+
+A fork of [Apollo](https://github.com/ClassicOldSong/Apollo) by **ClassicOldSong** — itself a fork of
+[Sunshine](https://github.com/LizardByte/Sunshine) by LizardByte — the self-hosted GameStream-compatible
+host [Virtual Moonlight](https://github.com/r0mn-creator/moonlight-vr) (a VR streaming client for Quest 3)
+talks to. All credit for the host software below belongs to ClassicOldSong (Apollo) and LizardByte
+(Sunshine); this fork exists to add real multi-monitor support for VR desktop use, without touching an
+install a user may already rely on for gaming. Licensed GPL-3.0, same as upstream.
+
+## About this fork
+
+Full design reasoning, including why this is architected as an in-place patch (not a replacement server)
+and the concrete implementation plan, lives in
+[Virtual Moonlight's `docs/BRAINSTORM.md`](https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md#virtual-sunshine--the-actual-plan)
+— the two projects are a client/host pair for the same effort. Status: no patch code yet. This repo
+currently exists to validate a real Windows build pipeline (Apollo's own CI workflows aren't in their
+public repo — this one was recovered from their git history) before any Productivity-mode changes land.
+
+---
+
 # Apollo
 
 Apollo is a self-hosted desktop stream host for [Artemis(Moonlight Noir)](https://github.com/ClassicOldSong/moonlight-android). Offering low latency, native client resolution, cloud gaming server capabilities with support for AMD, Intel, and Nvidia GPUs for hardware encoding. Software encoding is also available. A web UI is provided to allow configuration and client pairing from your favorite web browser. Pair from the local server or any mobile device.

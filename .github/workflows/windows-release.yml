@@ -1,0 +1,94 @@
+name: Windows Release Build
+
+# Adapted from Apollo's own ci-windows.yml, which existed in their git history
+# (last present at commit da5a4e3e2^, removed 2025-07-14) but isn't in the
+# current public repo. Trimmed down: no docs/coverage/test steps, no
+# workflow_call multi-OS orchestration - just build, package, publish.
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build_windows:
+    name: Windows-AMD64
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ucrt64
+          update: true
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git \
+            mingw-w64-ucrt-x86_64-cmake \
+            mingw-w64-ucrt-x86_64-cppwinrt \
+            mingw-w64-ucrt-x86_64-curl-winssl \
+            mingw-w64-ucrt-x86_64-gcc \
+            mingw-w64-ucrt-x86_64-MinHook \
+            mingw-w64-ucrt-x86_64-miniupnpc \
+            mingw-w64-ucrt-x86_64-nlohmann-json \
+            mingw-w64-ucrt-x86_64-nodejs \
+            mingw-w64-ucrt-x86_64-nsis \
+            mingw-w64-ucrt-x86_64-onevpl \
+            mingw-w64-ucrt-x86_64-openssl \
+            mingw-w64-ucrt-x86_64-opus \
+            mingw-w64-ucrt-x86_64-toolchain \
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja -S . \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DSUNSHINE_ASSETS_DIR=assets \
+            -DSUNSHINE_PUBLISHER_NAME='${{ github.repository_owner }}' \
+            -DSUNSHINE_PUBLISHER_WEBSITE='https://github.com/${{ github.repository }}' \
+            -DSUNSHINE_PUBLISHER_ISSUE_URL='https://github.com/${{ github.repository }}/issues'
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Package
+        run: |
+          mkdir -p artifacts
+          cd build
+          cpack -G NSIS
+          cpack -G ZIP
+          mv cpack_artifacts/*.exe ../artifacts/VirtualSunshine-installer.exe
+          mv cpack_artifacts/*.zip ../artifacts/VirtualSunshine-portable.zip
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: artifacts/
+          if-no-files-found: error
+
+      - name: Publish a pre-release
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Baseline build ${{ github.run_number }} (unmodified Apollo)"
+          body: |
+            Unmodified Apollo, built through Virtual Sunshine's own CI as a
+            pipeline checkpoint - no Productivity-mode patch yet. See
+            https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md
+            for the actual plan.
+          prerelease: true
+          files: artifacts/*
