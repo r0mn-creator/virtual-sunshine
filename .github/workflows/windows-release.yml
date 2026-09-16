@@ -84,11 +84,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: "Baseline build ${{ github.run_number }} (unmodified Apollo)"
+          name: "Dev build ${{ github.run_number }}"
           body: |
-            Unmodified Apollo, built through Virtual Sunshine's own CI as a
-            pipeline checkpoint - no Productivity-mode patch yet. See
+            Development build of Virtual Sunshine (Apollo fork with a PMode
+            productivity-streaming patch in progress). Not yet feature-complete
+            or verified on real hardware. See
             https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md
-            for the actual plan.
+            for the actual plan and current status.
           prerelease: true
           files: artifacts/*
