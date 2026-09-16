@@ -86,9 +86,9 @@ jobs:
           tag_name: build-${{ github.run_number }}
           name: "Dev build ${{ github.run_number }}"
           body: |
-            Development build of Virtual Sunshine (Apollo fork with a PMode
-            productivity-streaming patch in progress). Not yet feature-complete
-            or verified on real hardware. See
+            Development build of Virtual Sunshine (Apollo fork with a
+            Productivity Mode streaming patch in progress). Not yet
+            feature-complete or verified on real hardware. See
             https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md
             for the actual plan and current status.
           prerelease: true
