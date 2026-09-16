@@ -1162,7 +1162,10 @@ namespace video {
     // display-switch hotkey, and never falls back to a different monitor if
     // this one disappears (fails closed instead, since a VR user has spatially
     // arranged their screens around a specific physical layout).
-    const std::string &pinned_display_name = {}
+    // NOTE: no default value here - std::thread invokes this indirectly, and
+    // default arguments aren't visible through that path, so every call site
+    // (both in this file) must pass all 5 arguments explicitly.
+    const std::string &pinned_display_name
   ) {
     std::vector<capture_ctx_t> capture_ctxs;
 
@@ -3127,7 +3130,11 @@ namespace video {
       capture_thread_ctx.capture_ctx_queue,
       std::ref(capture_thread_ctx.display_wp),
       std::ref(capture_thread_ctx.reinit_event),
-      std::ref(*capture_thread_ctx.encoder_p)
+      std::ref(*capture_thread_ctx.encoder_p),
+      // std::thread can't fall back on captureThread's default argument -
+      // default args aren't visible through its indirect invocation, so it
+      // must be passed explicitly here.
+      std::string {}
     };
 
     return 0;
