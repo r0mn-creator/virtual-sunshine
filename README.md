@@ -9,12 +9,26 @@ install a user may already rely on for gaming. Licensed GPL-3.0, same as upstrea
 
 ## About this fork
 
-Full design reasoning, including why this is architected as an in-place patch (not a replacement server)
-and the concrete implementation plan, lives in
+Full design reasoning, including why this is architected as an in-place patch (not a replacement server),
+lives in
 [Virtual Moonlight's `docs/BRAINSTORM.md`](https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md#virtual-sunshine--the-actual-plan)
-— the two projects are a client/host pair for the same effort. Status: no patch code yet. This repo
-currently exists to validate a real Windows build pipeline (Apollo's own CI workflows aren't in their
-public repo — this one was recovered from their git history) before any Productivity-mode changes land.
+— the two projects are a client/host pair for the same effort. Status: Productivity Mode's server-side
+capture/session path is implemented; still in development and not yet verified against real hardware by
+anyone outside this fork.
+
+### Installing or updating
+
+- **Fresh install, or you don't already have Apollo/Sunshine set up**: download and run the `.exe`
+  installer from [Releases](https://github.com/r0mn-creator/virtual-sunshine/releases).
+- **You already have Apollo or Sunshine installed for gaming**: download the portable `.zip` instead, and
+  extract its files directly into your existing install folder, overwriting what's there. Your settings,
+  pairings, and app list are untouched.
+  **Then, once, right-click `fix-permissions.bat` (now sitting in that same folder) and choose "Run as
+  Administrator."** A fresh install's `config` folder gets its file permissions set up by the installer
+  itself; a plain file drop-in skips that step, and the certificate/log files that get overwritten can end
+  up with permissions Sunshine can no longer read — it'll fail to start with an "Access is denied" error
+  the moment it tries to load its TLS certificate. Running this script once fixes it. Safe to run again on
+  every future update, or even on an install that's already working fine.
 
 ---
 

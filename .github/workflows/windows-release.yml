@@ -91,5 +91,12 @@ jobs:
             feature-complete or verified on real hardware. See
             https://github.com/r0mn-creator/moonlight-vr/blob/master/docs/BRAINSTORM.md
             for the actual plan and current status.
+
+            **Updating an existing Apollo/Sunshine install** (portable ZIP,
+            not the installer)? After extracting, right-click
+            `fix-permissions.bat` in that folder and "Run as Administrator"
+            once. A plain file drop-in skips a permissions step the real
+            installer normally does, and without it Sunshine fails to start
+            with an "Access is denied" error on its TLS certificate.
           prerelease: true
           files: artifacts/*
