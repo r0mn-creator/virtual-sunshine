@@ -497,6 +497,9 @@ namespace config {
     {},  // adapter_name
     {},  // output_name
 
+    false,  // pmode_enabled
+    {},  // pmode_displays
+
     {
       video_t::dd_t::config_option_e::disabled,  // configuration_option
       video_t::dd_t::resolution_option_e::automatic,  // resolution_option
@@ -1181,6 +1184,11 @@ namespace config {
     string_f(vars, "encoder", video.encoder);
     string_f(vars, "adapter_name", video.adapter_name);
     string_f(vars, "output_name", video.output_name);
+
+    // Virtual Sunshine: Productivity mode - which real outputs to stream as
+    // a parallel multi-display session, e.g. pmode_displays = [\DISPLAY1, \DISPLAY2]
+    bool_f(vars, "pmode_enabled", video.pmode_enabled);
+    list_string_f(vars, "pmode_displays", video.pmode_displays);
 
     generic_f(vars, "dd_configuration_option", video.dd.configuration_option, dd::config_option_from_view);
     generic_f(vars, "dd_resolution_option", video.dd.resolution_option, dd::resolution_option_from_view);

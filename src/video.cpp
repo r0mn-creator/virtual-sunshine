@@ -6,7 +6,9 @@
 #include <atomic>
 #include <bitset>
 #include <list>
+#include <mutex>
 #include <thread>
+#include <unordered_map>
 
 // lib includes
 #include <boost/pointer_cast.hpp>
@@ -479,9 +481,20 @@ namespace video {
   int start_capture_async(capture_thread_async_ctx_t &ctx);
   void end_capture_async(capture_thread_async_ctx_t &ctx);
 
+  // Virtual Sunshine: Productivity mode - returns the capture thread pinned to
+  // `display_name`, starting one on first use. Returns nullptr on failure.
+  capture_thread_async_ctx_t *acquire_pmode_capture_thread(const std::string &display_name);
+
   // Keep a reference counter to ensure the capture thread only runs when other threads have a reference to the capture thread
   auto capture_thread_async = safe::make_shared<capture_thread_async_ctx_t>(start_capture_async, end_capture_async);
   auto capture_thread_sync = safe::make_shared<capture_thread_sync_ctx_t>(start_capture_sync, end_capture_sync);
+
+  // Virtual Sunshine: Productivity mode - one capture thread per pinned real
+  // display, kept in its own registry so it never contends with the single
+  // shared capture_thread_async instance above (which always follows
+  // proc::proc.display_name, i.e. the Gaming path).
+  std::mutex pmode_capture_mutex;
+  std::unordered_map<std::string, std::unique_ptr<capture_thread_async_ctx_t>> pmode_capture_threads;
 
 #ifdef _WIN32
   encoder_t nvenc {
@@ -1142,7 +1155,14 @@ namespace video {
     std::shared_ptr<safe::queue_t<capture_ctx_t>> capture_ctx_queue,
     sync_util::sync_t<std::weak_ptr<platf::display_t>> &display_wp,
     safe::signal_t &reinit_event,
-    const encoder_t &encoder
+    const encoder_t &encoder,
+    // Virtual Sunshine: Productivity mode. When non-empty, this thread is
+    // pinned to exactly this real display for its whole lifetime - it never
+    // reads or writes proc::proc.display_name, never listens for the Gaming
+    // display-switch hotkey, and never falls back to a different monitor if
+    // this one disappears (fails closed instead, since a VR user has spatially
+    // arranged their screens around a specific physical layout).
+    const std::string &pinned_display_name = {}
   ) {
     std::vector<capture_ctx_t> capture_ctxs;
 
@@ -1158,7 +1178,12 @@ namespace video {
       }
     });
 
-    auto switch_display_event = mail::man->event<int>(mail::switch_display);
+    // Virtual Sunshine: a pinned PMode thread never listens for Gaming's
+    // display-switch hotkey - it never shares that global mailbox event.
+    decltype(mail::man->event<int>(mail::switch_display)) switch_display_event;
+    if (pinned_display_name.empty()) {
+      switch_display_event = mail::man->event<int>(mail::switch_display);
+    }
 
     // Wait for the initial capture context or a request to stop the queue
     auto initial_capture_ctx = capture_ctx_queue->pop();
@@ -1170,18 +1195,26 @@ namespace video {
     std::vector<std::string> display_names;
     int display_p = -1;
     std::shared_ptr<platf::display_t> disp;
-    if (!proc::proc.display_name.empty()) {
-      disp = platf::display(encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
-    }
-    if (!disp) {
-      // Get all the monitor names now, rather than at boot, to
-      // get the most up-to-date list available monitors
-      refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
-      disp = platf::display(encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
-      if (disp) {
-        proc::proc.display_name = display_names[display_p];
-      } else {
+    if (!pinned_display_name.empty()) {
+      disp = platf::display(encoder.platform_formats->dev_type, pinned_display_name, capture_ctxs.front().config);
+      if (!disp) {
+        // Fail closed: don't guess at a different physical monitor.
         return;
+      }
+    } else {
+      if (!proc::proc.display_name.empty()) {
+        disp = platf::display(encoder.platform_formats->dev_type, proc::proc.display_name, capture_ctxs.front().config);
+      }
+      if (!disp) {
+        // Get all the monitor names now, rather than at boot, to
+        // get the most up-to-date list available monitors
+        refresh_displays(encoder.platform_formats->dev_type, display_names, display_p);
+        disp = platf::display(encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+        if (disp) {
+          proc::proc.display_name = display_names[display_p];
+        } else {
+          return;
+        }
       }
     }
 
@@ -1313,7 +1346,7 @@ namespace video {
           capture_ctxs.emplace_back(std::move(*capture_ctx_queue->pop()));
         }
 
-        if (switch_display_event->peek()) {
+        if (switch_display_event && switch_display_event->peek()) {
           artificial_reinit = true;
           return false;
         }
@@ -1363,28 +1396,44 @@ namespace video {
               std::this_thread::sleep_for(20ms);
             }
 
-            while (capture_ctx_queue->running()) {
-              // Release the display before reenumerating displays, since some capture backends
-              // only support a single display session per device/application.
-              disp.reset();
-
-              // Refresh display names since a display removal might have caused the reinitialization
-              refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, proc::proc.display_name);
-
-              // Process any pending display switch with the new list of displays
-              if (switch_display_event->peek()) {
-                display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
+            if (!pinned_display_name.empty()) {
+              // PMode: retry the same pinned display only - never fall back
+              // to a different physical monitor and never touch the
+              // Gaming-only proc::proc.display_name/switch_display_event state.
+              while (capture_ctx_queue->running()) {
+                disp.reset();
+                reset_display(disp, encoder.platform_formats->dev_type, pinned_display_name, capture_ctxs.front().config);
+                if (disp) {
+                  break;
+                }
               }
-
-              // reset_display() will sleep between retries
-              reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
-              if (disp) {
-                proc::proc.display_name = display_names[display_p];
-                break;
+              if (!disp) {
+                return;
               }
-            }
-            if (!disp) {
-              return;
+            } else {
+              while (capture_ctx_queue->running()) {
+                // Release the display before reenumerating displays, since some capture backends
+                // only support a single display session per device/application.
+                disp.reset();
+
+                // Refresh display names since a display removal might have caused the reinitialization
+                refresh_displays(encoder.platform_formats->dev_type, display_names, display_p, proc::proc.display_name);
+
+                // Process any pending display switch with the new list of displays
+                if (switch_display_event->peek()) {
+                  display_p = std::clamp(*switch_display_event->pop(), 0, (int) display_names.size() - 1);
+                }
+
+                // reset_display() will sleep between retries
+                reset_display(disp, encoder.platform_formats->dev_type, display_names[display_p], capture_ctxs.front().config);
+                if (disp) {
+                  proc::proc.display_name = display_names[display_p];
+                  break;
+                }
+              }
+              if (!disp) {
+                return;
+              }
             }
 
             display_wp = disp;
@@ -2430,6 +2479,99 @@ namespace video {
     }
   }
 
+  // Virtual Sunshine: Productivity mode capture entry point. Deliberately a
+  // separate function rather than a refactor of capture_async() above - the
+  // display-reinit logic in captureThread() is intricate, hardware-dependent
+  // code with no local way to test PMode's pinned-display branch, so Gaming's
+  // proven path (capture_async/capture_thread_async) is left completely
+  // untouched. This mirrors capture_async(), but resolves its per-display
+  // capture thread through acquire_pmode_capture_thread() instead of the
+  // single shared capture_thread_async singleton.
+  void capture_pmode(
+    safe::mail_t mail,
+    config_t config,
+    void *channel_data,
+    const std::string &display_name
+  ) {
+    auto shutdown_event = mail->event<bool>(mail::shutdown);
+
+    auto images = std::make_shared<img_event_t::element_type>();
+    auto lg = util::fail_guard([&]() {
+      images->stop();
+      shutdown_event->raise(true);
+    });
+
+    auto *ref = acquire_pmode_capture_thread(display_name);
+    if (!ref) {
+      return;
+    }
+
+    ref->capture_ctx_queue->raise(capture_ctx_t {images, config});
+
+    if (!ref->capture_ctx_queue->running()) {
+      return;
+    }
+
+    int frame_nr = 1;
+
+    auto touch_port_event = mail->event<input::touch_port_t>(mail::touch_port);
+    auto hdr_event = mail->event<hdr_info_t>(mail::hdr);
+
+    // Encoding takes place on this thread
+    platf::adjust_thread_priority(platf::thread_priority_e::high);
+
+    while (!shutdown_event->peek() && images->running()) {
+      // Wait for the main capture event when the display is being reinitialized
+      if (ref->reinit_event.peek()) {
+        std::this_thread::sleep_for(20ms);
+        continue;
+      }
+      // Wait for the display to be ready
+      std::shared_ptr<platf::display_t> display;
+      {
+        auto dlg = ref->display_wp.lock();
+        if (ref->display_wp->expired()) {
+          continue;
+        }
+
+        display = ref->display_wp->lock();
+      }
+
+      auto &encoder = *chosen_encoder;
+
+      auto encode_device = make_encode_device(*display, encoder, config);
+      if (!encode_device) {
+        return;
+      }
+
+      // absolute mouse coordinates require that the dimensions of the screen are known
+      touch_port_event->raise(make_port(display.get(), config));
+
+      // Update client with our current HDR display state
+      hdr_info_t hdr_info = std::make_unique<hdr_info_raw_t>(false);
+      if (colorspace_is_hdr(encode_device->colorspace)) {
+        if (display->get_hdr_metadata(hdr_info->metadata)) {
+          hdr_info->enabled = true;
+        } else {
+          BOOST_LOG(error) << "Couldn't get display hdr metadata when colorspace selection indicates it should have one";
+        }
+      }
+      hdr_event->raise(std::move(hdr_info));
+
+      encode_run(
+        frame_nr,
+        mail,
+        images,
+        config,
+        display,
+        std::move(encode_device),
+        ref->reinit_event,
+        *ref->encoder_p,
+        channel_data
+      );
+    }
+  }
+
   void capture(
     safe::mail_t mail,
     config_t config,
@@ -2995,6 +3137,47 @@ namespace video {
     capture_thread_ctx.capture_ctx_queue->stop();
 
     capture_thread_ctx.capture_thread.join();
+  }
+
+  capture_thread_async_ctx_t *acquire_pmode_capture_thread(const std::string &display_name) {
+    std::lock_guard lg {pmode_capture_mutex};
+
+    auto it = pmode_capture_threads.find(display_name);
+    if (it != pmode_capture_threads.end()) {
+      return it->second.get();
+    }
+
+    auto ctx = std::make_unique<capture_thread_async_ctx_t>();
+    ctx->encoder_p = chosen_encoder;
+    ctx->reinit_event.reset();
+    ctx->capture_ctx_queue = std::make_shared<safe::queue_t<capture_ctx_t>>(30);
+    ctx->capture_thread = std::thread {
+      captureThread,
+      ctx->capture_ctx_queue,
+      std::ref(ctx->display_wp),
+      std::ref(ctx->reinit_event),
+      std::ref(*ctx->encoder_p),
+      display_name
+    };
+
+    auto [inserted_it, ok] = pmode_capture_threads.emplace(display_name, std::move(ctx));
+    return inserted_it->second.get();
+  }
+
+  void end_capture_pmode(const std::string &display_name) {
+    std::unique_ptr<capture_thread_async_ctx_t> ctx;
+    {
+      std::lock_guard lg {pmode_capture_mutex};
+      auto it = pmode_capture_threads.find(display_name);
+      if (it == pmode_capture_threads.end()) {
+        return;
+      }
+      ctx = std::move(it->second);
+      pmode_capture_threads.erase(it);
+    }
+
+    ctx->capture_ctx_queue->stop();
+    ctx->capture_thread.join();
   }
 
   int start_capture_sync(capture_thread_sync_ctx_t &ctx) {

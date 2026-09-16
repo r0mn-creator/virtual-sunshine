@@ -88,6 +88,12 @@ namespace config {
     std::string adapter_name;
     std::string output_name;
 
+    // Virtual Sunshine: Productivity mode (PMode) - a parallel capture path
+    // that streams multiple real outputs at once for VR desktop use,
+    // alongside the existing single-display gaming path above.
+    bool pmode_enabled;
+    std::vector<std::string> pmode_displays;
+
     struct dd_t {
       struct workarounds_t {
         std::chrono::milliseconds hdr_toggle_delay;  ///< Specify whether to apply HDR high-contrast color workaround and what delay to use.

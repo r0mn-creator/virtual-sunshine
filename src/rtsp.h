@@ -51,6 +51,11 @@ namespace rtsp_stream {
     bool virtual_display;
     uint32_t scale_factor;
 
+    // Virtual Sunshine: the real output this connection should stream, set by
+    // Virtual Moonlight's Productivity mode (PMode) when it opens one
+    // connection per physical monitor. Empty for an ordinary Gaming launch.
+    std::string pmode_display;
+
     std::optional<crypto::cipher::gcm_t> rtsp_cipher;
     std::string rtsp_url_scheme;
     uint32_t rtsp_iv_counter;

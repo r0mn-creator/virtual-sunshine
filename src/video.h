@@ -347,6 +347,27 @@ namespace video {
     void *channel_data
   );
 
+  /**
+   * @brief Virtual Sunshine: Productivity mode (PMode) capture entry point.
+   * Runs an independent capture+encode pipeline pinned to one specific real
+   * display, separate from the single shared Gaming capture path above, so
+   * several of these can run concurrently (one per physical monitor) without
+   * disturbing config::video.output_name or proc::proc.display_name.
+   * @param display_name The exact platform display name to pin this session to.
+   */
+  void capture_pmode(
+    safe::mail_t mail,
+    config_t config,
+    void *channel_data,
+    const std::string &display_name
+  );
+
+  /**
+   * @brief Tear down the Productivity-mode capture thread pinned to `display_name`,
+   * once no session needs it anymore.
+   */
+  void end_capture_pmode(const std::string &display_name);
+
   bool validate_encoder(encoder_t &encoder, bool expect_failure);
 
   /**

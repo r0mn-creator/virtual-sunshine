@@ -416,6 +416,11 @@ namespace stream {
     std::string device_uuid;
     crypto::PERM permission;
 
+    // Virtual Sunshine: which real output this session should stream, when
+    // launched by Virtual Moonlight's Productivity mode (PMode). Empty for
+    // an ordinary Gaming session, which keeps following config::video.output_name.
+    std::string pmode_display;
+
     std::list<crypto::command_entry_t> do_cmds;
     std::list<crypto::command_entry_t> undo_cmds;
 
@@ -1917,7 +1922,16 @@ namespace stream {
     session->video.qos = platf::enable_socket_qos(ref->video_sock.native_handle(), address, session->video.peer.port(), platf::qos_data_type_e::video, session->config.videoQosType != 0);
 
     BOOST_LOG(debug) << "Start capturing Video"sv;
-    video::capture(session->mail, session->config.monitor, session);
+    if (!session->pmode_display.empty()) {
+      video::capture_pmode(session->mail, session->config.monitor, session, session->pmode_display);
+      // NOTE: assumes one session per pinned display for now, so it's safe to
+      // tear down as soon as this session's capture loop returns. If PMode
+      // ever allows several sessions to share one display concurrently, this
+      // needs real ref-counting instead.
+      video::end_capture_pmode(session->pmode_display);
+    } else {
+      video::capture(session->mail, session->config.monitor, session);
+    }
   }
 
   void audioThread(session_t *session) {
@@ -2158,6 +2172,8 @@ namespace stream {
 
       session->do_cmds = std::move(launch_session.client_do_cmds);
       session->undo_cmds = std::move(launch_session.client_undo_cmds);
+
+      session->pmode_display = launch_session.pmode_display;
 
       session->config = config;
 
