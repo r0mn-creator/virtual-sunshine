@@ -456,7 +456,18 @@ namespace rtsp_stream {
 
       auto socket = std::move(next_socket);
 
-      auto launch_session {launch_event.view(0s)};
+      // Peek the oldest pending session without removing it (matching the
+      // old view()'s non-destructive semantics) - a session's own handshake
+      // can involve more than one TCP connection, all of which need to find
+      // it still here until session_clear() finally removes it once the
+      // control stream connects.
+      std::shared_ptr<launch_session_t> launch_session;
+      {
+        auto &pending = launch_queue.unsafe();
+        if (!pending.empty()) {
+          launch_session = pending.front();
+        }
+      }
       if (launch_session) {
         // Associate the current RTSP session with this socket and start reading
         socket->session = launch_session;
@@ -490,19 +501,22 @@ namespace rtsp_stream {
      * @param launch_session Streaming session information.
      */
     void session_raise(std::shared_ptr<launch_session_t> launch_session) {
-      // If a launch event is still pending, don't overwrite it.
-      if (launch_event.view(0s)) {
-        return;
-      }
+      // Queue the new launch session to prepare for the RTSP handshake -
+      // does not touch whatever's already pending (see launch_queue's
+      // comment for why this is safe for Virtual Moonlight's launch order
+      // but isn't a general concurrent-session guarantee).
+      launch_queue.raise(std::move(launch_session));
 
-      // Raise the new launch session to prepare for the RTSP handshake
-      launch_event.raise(std::move(launch_session));
-
-      // Arm the timer to expire this launch session if the client times out
+      // Arm the timer to expire the oldest pending session if a client
+      // never follows through with its RTSP connection. Rescheduled on
+      // every raise, same as before this was a queue - with several
+      // sessions queued in a short window, this remains an approximation
+      // (an earlier entry can get a bit more time than strictly
+      // ping_timeout), not a per-entry deadline.
       raised_timer.expires_after(config::stream.ping_timeout);
       raised_timer.async_wait([this](const boost::system::error_code &ec) {
         if (!ec) {
-          auto discarded = launch_event.pop(0s);
+          auto discarded = launch_queue.pop(0s);
           if (discarded) {
             BOOST_LOG(debug) << "Event timeout: "sv << discarded->unique_id;
           }
@@ -515,17 +529,17 @@ namespace rtsp_stream {
      * @param launch_session_id The ID of the session to clear.
      */
     void session_clear(uint32_t launch_session_id) {
-      // We currently only support a single pending RTSP session,
-      // so the ID should always match the one for that session.
-      auto launch_session = launch_event.view(0s);
-      if (launch_session) {
-        if (launch_session->id != launch_session_id) {
-          BOOST_LOG(error) << "Attempted to clear unexpected session: "sv << launch_session_id << " vs "sv << launch_session->id;
-        } else {
-          raised_timer.cancel();
-          launch_event.pop();
+      // Several sessions can be queued at once now (Virtual Moonlight's
+      // multi-screen launch) - find and remove the specific one whose
+      // control stream just connected, not just "the" one pending entry.
+      auto &pending = launch_queue.unsafe();
+      for (auto it = pending.begin(); it != pending.end(); ++it) {
+        if ((*it)->id == launch_session_id) {
+          pending.erase(it);
+          return;
         }
       }
+      BOOST_LOG(error) << "Attempted to clear unexpected session: "sv << launch_session_id;
     }
 
     /**
@@ -537,7 +551,21 @@ namespace rtsp_stream {
       return _session_slots->size();
     }
 
-    safe::event_t<std::shared_ptr<launch_session_t>> launch_event;
+    // Virtual Sunshine PMode: was a single-slot safe::event_t that silently
+    // DROPPED a new launch_session_raise() if one was already pending -
+    // fine for one client launching one app at a time, but confirmed on
+    // real hardware to break Virtual Moonlight's multi-screen launch (3
+    // near-simultaneous /launch calls from the same client), since the
+    // 2nd/3rd screen's session would just vanish rather than queue up.
+    // A queue absorbs the overlap instead of dropping it. This does NOT
+    // make truly concurrent handshakes safe in general - the RTSP protocol
+    // gives handle_accept() no way to tell which pending session an
+    // incoming TCP connection belongs to, so it still just takes whichever
+    // one is oldest (the front). That's correct as long as connections
+    // arrive in the same order sessions were raised, which holds for how
+    // Virtual Moonlight actually launches its screens (staggered, one
+    // after another) but would not hold for genuinely arbitrary reordering.
+    safe::queue_t<std::shared_ptr<launch_session_t>> launch_queue {8};
 
     /**
      * @brief Clear launch sessions.
